@@ -78,6 +78,8 @@ def generate_signal(context,security,points):
 def generate_max_min(context, data):
     try:
         price_data = data.history(context.securities, ['open','high','low','close'], context.params['indicator_lookback'], context.params['indicator_freq'])
+        current_price = data.current(context.securities, ['open','high','low','close'])
+        price_data.append(current_price)
     except:
         return
 
