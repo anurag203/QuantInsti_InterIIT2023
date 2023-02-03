@@ -23,7 +23,7 @@ def initialize(context):
 
     # variables to calculate support and resistance line and target portfolio
     context.stop_loss = dict((security,0) for security in context.securities)
-    context.exit = dict((security,0) for security in context.securities)
+    context.exits = dict((security,0) for security in context.securities)
     context.signal = dict((security,0) for security in context.securities)
     context.target_position = dict((security,0) for security in context.securities)
 
@@ -87,11 +87,12 @@ def generate_signal(context, data):
         previous_candle = px.iloc[-2]
         present_candle=px.iloc[-1]
         # check if the candle is bulish engulfing and 
+        # is_bullish_engulfing(px)
         if is_bullish_engulfing(px):
             context.signal[security] = context.params['buy_signal']
             context.stop_loss[security] = previous_candle['low']
-            context.exit[security] = previous_candle.['high']+3*(previous_candle['high']-previous_candle['low'])
-        elif context.stop_loss[security]>=px[-1]['close'] or context.exit[security]<=px[-1]['close']:
+            context.exits[security] = previous_candle['high']+3*(previous_candle['high']-previous_candle['low'])
+        elif context.stop_loss[security]>=present_candle['close'] or context.exits[security]<=present_candle['close']:
             context.signal[security] = context.params['sell_signal']            
         else:
             context.signal[security] =0
