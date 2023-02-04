@@ -7,18 +7,18 @@ from math import sqrt
 
 def initialize(context):
     # universe selection
-    context.securities = [symbol('NIFTY-I'),symbol('BANKNIFTY-I')]
+    context.securities = [symbol('RELIANCE')]
     # context.securities = [symbol('ADANIPOWER')]
 
     # define strategy parameters
     context.params = {'indicator_lookback':100,
-                      'indicator_freq':'1d',
+                      'indicator_freq':'1m',
                       'buy_signal':1,
                       'sell_signal':-1,
                       'ROC_period_short':30,
                       'ROC_period_long':120,
                       'ADX_period':120,
-                      'trade_freq':30,
+                      'trade_freq':5,
                       'leverage':1}
 
     # variables to calculate support and resistance line and target portfolio
@@ -65,16 +65,33 @@ def generate_target_position(context, data):
             context.target_position[security] = 0
 
 
-
 def is_bullish_engulfing(candles):
-    present_candle = candles.iloc[-1]
-    last_candle = candles.iloc[-2]
-    last_to_last_candle = candles.iloc[-3]
-    if (last_candle['close'] < last_candle['open']) and (last_to_last_candle['close'] > last_to_last_candle['open']) and (last_candle['close'] < last_to_last_candle['close'] and last_candle['open'] > last_to_last_candle['open']):
-        # checking if the current candle is breaking the high of the previous engulfing candle
-        if present_candle['high']>last_candle['close']:    
-            return True
-    return False
+    
+        present_candle = candles.iloc[-1]
+        en_candle = candles.iloc[-2]
+        prev_candle = candles.iloc[-3]
+
+        close = en_candle['close']
+        openf = en_candle['open']
+        high = en_candle['high']
+        low = en_candle['low']
+
+        prev_close = prev_candle['close']
+        prev_open = prev_candle['open']
+        prev_high = prev_candle['high']
+        prev_low = prev_candle['low']
+
+        # return (prev_close < prev_open and
+        #         0.3 > abs(prev_close - prev_open) / (prev_high - prev_low) >= 0.1 and
+        #         close > openf and
+        #         abs(close - openf) / (high - low) >= 0.7 and
+        #         prev_high < close and
+        #         prev_low > openf)
+
+        if (close >= prev_open) and (prev_open > prev_close) and (close > openf) and (prev_close >= openf) and (close - openf > prev_open - prev_close):
+            if present_candle['close']>=en_candle['high']:
+                return True
+        return False
 
 def generate_signal(context, data):
     try:
@@ -86,21 +103,14 @@ def generate_signal(context, data):
         px = price_data.xs(security)
         previous_candle = px.iloc[-2]
         present_candle=px.iloc[-1]
+        last_to_last=px.iloc[-3]
         # check if the candle is bulish engulfing and 
-        # is_bullish_engulfing(px)
+        is_bullish_engulfing(px)
         if is_bullish_engulfing(px):
             context.signal[security] = context.params['buy_signal']
-            context.stop_loss[security] = previous_candle['low']
+            context.stop_loss[security] = min(previous_candle['low'],last_to_last['low'])
             context.exits[security] = previous_candle['high']+3*(previous_candle['high']-previous_candle['low'])
         elif context.stop_loss[security]>=present_candle['close'] or context.exits[security]<=present_candle['close']:
             context.signal[security] = context.params['sell_signal']            
-        else:
-            context.signal[security] =0
-
-def is_bearish_engulfing(candles):
-    present_candle = candles.iloc[-1]
-    last_candle = candles.iloc[-2]
-    last_to_last_candle = candles.iloc[-3]
-    if (last_candle['close'] > last_candle['open']) and (last_to_last_candle['close'] < last_to_last_candle['open']) and (last_candle['close'] > last_to_last_candle['close'] and last_candle['open'] < last_to_last_candle['open']):
-        return True
-    return False
+        # else:
+        #     context.signal[security] =0
