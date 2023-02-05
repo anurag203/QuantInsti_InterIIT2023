@@ -1,0 +1,174 @@
+from blueshift.library.technicals.indicators import fibonacci_support, adx
+import numpy as np
+import pandas as pd
+import talib
+from blueshift.finance import commission, slippage
+from blueshift.api import (symbol,
+                           order_target_percent,
+                           set_commission,
+                           set_slippage,
+                           schedule_function,
+                           date_rules,
+                           time_rules,
+                           get_datetime,
+                           )
+
+
+def initialize(context):
+    """
+        A function to define things to do at the start of the strategy
+    """
+    # universe selection
+    context.securities = [symbol('RELIANCE')]
+
+    # define strategy parameters
+    context.params = {'indicator_lookback': 6,
+                      'indicator_freq': '1m',
+                      'buy_signal_threshold': 0.5,
+                      'sell_signal_threshold': -0.5,
+                      'ROC_period_short': 30,
+                      'ROC_period_long': 120,
+                      'ADX_period': 120,
+                      'trade_freq': 1,
+                      'leverage': 2}
+
+    # variable to control trading frequency
+    context.bar_count = 0
+
+    # variables to track signals and target portfolio
+    context.signals = dict((security, 0) for security in context.securities)
+    context.target_position = dict((security, 0)
+                                   for security in context.securities)
+    context.stop_loss = dict((security, 0) for security in context.securities)
+    context.target_price = dict((security, 0)
+                                for security in context.securities)
+
+    # set trading cost and slippage to zero
+    set_commission(commission.PerShare(cost=0.002, min_trade_cost=0.0))
+    set_slippage(slippage.FixedSlippage(0.00))
+
+    freq = int(context.params['trade_freq'])
+    schedule_function(run_strategy, date_rules.every_day(),
+                      time_rules.every_nth_minute(freq))
+
+    schedule_function(stop_trading, date_rules.every_day(),
+                      time_rules.market_close(minutes=30))
+
+
+def before_trading_start(context, data):
+    context.trade = True
+
+
+def stop_trading(context, data):
+    context.trade = False
+
+
+def run_strategy(context, data):
+    """
+        A function to define core strategy steps
+    """
+    if not context.trade:
+        return
+
+    generate_signals(context, data)
+    generate_target_position(context, data)
+    rebalance(context, data)
+
+
+def rebalance(context, data):
+    '''
+        A function to rebalance - all execution logic goes here
+    '''
+    for security in context.securities:
+        order_target_percent(security, context.target_position[security])
+
+
+def generate_target_position(context, data):
+    """
+        A function to define target portfolio
+    """
+    num_secs = len(context.securities)
+    weight = round(1.0/num_secs, 2)*context.params['leverage']
+
+    for security in context.securities:
+        if context.signals[security] > context.params['buy_signal_threshold']:
+            context.target_position[security] = weight
+        elif context.signals[security] < context.params['sell_signal_threshold']:
+            context.target_position[security] = -weight
+        else:
+            context.target_position[security] = 0
+
+
+def generate_signals(context, data):
+    """
+        A function to define define the signal generation
+    """
+    try:
+        price_data = data.history(context.securities, ['open', 'high', 'low', 'close'],
+                                  context.params['indicator_lookback'], context.params['indicator_freq'])
+        price_data_current = data.current(
+            context.securities, ['open', 'high', 'low', 'close'])
+    except:
+        return
+
+    for security in context.securities:
+        px = price_data.xs(security)
+        s = np.mean(px['high'] - px['low'])
+        
+        levels = []
+        def isFarFromLevel(l):
+            return np.sum([abs(l-x) < s for x in levels]) == 0
+        for i in range(2, px.shape[0]-2):
+            if isSupport(px, i):
+                l = px['low'][i]
+                if isFarFromLevel(l):
+                    levels.append((i, l))
+            elif isResistance(px, i):
+                l = px['high'][i]
+                if isFarFromLevel(l):
+                    levels.append((i, l))
+        minn, maxx = loc_max_min(px)
+        context.stop_loss[security] = minn
+        curr_candle = px.iloc[-1]
+        prev_candle = px.iloc[-2]
+        if (len(levels)>1 and min(prev_candle['close'], prev_candle['open']) < levels[-1][1] and max(prev_candle['close'], prev_candle['open'])):
+            return 1
+        if (context.target_position[security] > 0):
+            if (curr_price['close'] <= context.stop_loss[security] or curr_price['close'] >= context.target_price[security]):
+                return 0
+        if (context.target_position[security] < 0):
+            if (curr_price['close'] >= context.stop_loss_short[security] or curr_price['close'] <= context.target_price_short[security]):
+                return 0
+
+
+def isSupport(px, i):
+    support = px['low'][i] < px['low'][i-1] and px['low'][i] < px['low'][i+1] \
+        and px['low'][i+1] < px['low'][i+2] and px['low'][i-1] < px['low'][i-2]
+    return support
+
+
+def isResistance(px, i):
+    resistance = px['high'][i] > px['high'][i-1] and px['high'][i] > px['high'][i+1] \
+        and px['high'][i+1] > px['high'][i+2] and px['high'][i-1] > px['high'][i-2]
+    return resistance
+
+
+
+
+def loc_max_min(px):
+    points = px.close.values
+    ma=-1
+    mi=-1
+    i = len(points)-2
+    for j in range(1, len(points)-1):
+        i = len(points)-1-j
+        if points[i-1] > points[i] < points[i+1]:
+            mi = points[i]
+            break
+
+    for j in range(1, len(points)-1):
+        i = len(points)-1-j
+        if points[i-1] < points[i] > points[i+1]:
+            ma = points[i]
+            break
+    return ma, mi
